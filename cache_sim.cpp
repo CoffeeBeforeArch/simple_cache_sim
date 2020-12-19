@@ -32,7 +32,15 @@ class CacheSim {
   }
 
   // Run the simulation
-  void run() {}
+  void run() {
+    // Keep reading data from a file
+    std::string line;
+    while (std::getline(infile, line)) {
+      // Get the data for the access
+      auto [type, address, instructions] = parse_line(line);
+      std::cout << type << " " << address << " " << instructions << '\n';
+    }
+  }
 
   // Destructor
   ~CacheSim() { infile.close(); }
@@ -85,13 +93,20 @@ class CacheSim {
 
   // Get memory access from the trace file
   std::tuple<bool, std::int64_t, int> parse_line(std::string access) {
-    return {0, 0, 0};
+    // What we want to parse
+    int type;
+    std::uint64_t address;
+    int instructions;
+
+    // Parse from the string we read from the file
+    sscanf(access.c_str(), "# %d %lx %d", &type, &address, &instructions);
+    return {type, address, instructions};
   }
 };
 
 int main(int argc, char *argv[]) {
   // Kill the program if we didn't get an input file
-  assert(argc < 2);
+  assert(argc == 2);
 
   // File location
   std::string location(argv[1]);
@@ -103,6 +118,7 @@ int main(int argc, char *argv[]) {
 
   // Create our simulator
   CacheSim simulator(location, block_size, associativity, capacity);
+  simulator.run();
 
   return 0;
 }
