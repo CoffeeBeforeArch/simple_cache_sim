@@ -1,9 +1,14 @@
 // A simple cache simulator implemented in C++
 // By: Nick from CoffeeBeforeArch
 
+#include <algorithm>
+#include <bit>
 #include <cassert>
+#include <cstdint>
 #include <fstream>
 #include <iostream>
+#include <ranges>
+#include <span>
 #include <string>
 #include <tuple>
 #include <vector>
@@ -11,7 +16,8 @@
 class CacheSim {
  public:
   // Constructor
-  CacheSim(std::string input, int bs, int a, int c) {
+  CacheSim(std::string input, unsigned bs, unsigned a, unsigned c, unsigned mp,
+           unsigned wbp) {
     // Initialize of input file stream object
     infile.open(input);
 
@@ -19,6 +25,8 @@ class CacheSim {
     block_size = bs;
     associativity = a;
     capacity = c;
+    miss_penalty = mp;
+    dirty_wb_penalty = wbp;
 
     // Calculate the number of blocks
     // Assume this divides evenly
@@ -29,6 +37,24 @@ class CacheSim {
     dirty.resize(num_blocks);
     valid.resize(num_blocks);
     priority.resize(num_blocks);
+
+    // Calculate values for traversal
+    // Cache lines come in the following format:
+    // |****** TAG ******|**** SET ****|** OFFSET **|
+    // Calculate the number of offset bits
+    auto block_bits = std::__popcount(block_size - 1);
+
+    // Calculate the number of set bits, and create a mask of 1s
+    set_offset = block_bits;
+    auto sets = capacity / (block_size * associativity);
+    set_mask = sets - 1;
+    auto set_bits = std::__popcount(set_mask);
+
+    // Calculate the bit-offset for the tag and create a mask of 1s
+    // Always use 64-bit addresses
+    tag_offset = block_bits + set_bits;
+    auto tag_bits = 64 - set_bits - block_bits;
+    tag_mask = (1 << tag_bits) - 1;
   }
 
   // Run the simulation
@@ -38,7 +64,9 @@ class CacheSim {
     while (std::getline(infile, line)) {
       // Get the data for the access
       auto [type, address, instructions] = parse_line(line);
-      std::cout << type << " " << address << " " << instructions << '\n';
+
+      // Probe the cache
+      auto [dirty_wb, cycles] = probe(type, address);
     }
   }
 
@@ -50,49 +78,57 @@ class CacheSim {
   std::ifstream infile;
 
   // Cache settings
-  int block_size;
-  int associativity;
-  int capacity;
+  unsigned block_size;
+  unsigned associativity;
+  unsigned capacity;
+  unsigned miss_penalty;
+  unsigned dirty_wb_penalty;
+
+  // Access settings
+  int set_offset;
+  int tag_offset;
+  int set_mask;
+  int tag_mask;
 
   // The actual cache state
   std::vector<std::uint64_t> tags;
-  std::vector<bool> dirty;
-  std::vector<bool> valid;
+  std::vector<char> dirty;
+  std::vector<char> valid;
   std::vector<int> priority;
 
   // Cache statistics
-  std::int64_t writes = 0;
-  std::int64_t reads = 0;
-  std::int64_t misses = 0;
-  std::int64_t dirty_wb = 0;
-  std::int64_t instructions = 0;
-  std::int64_t cycles = 0;
+  std::int64_t writes_ = 0;
+  std::int64_t reads_ = 0;
+  std::int64_t misses_ = 0;
+  std::int64_t dirty_wb_ = 0;
+  std::int64_t instructions_ = 0;
+  std::int64_t cycles_ = 0;
 
   // Dump the statistics from simulation
   void dump_stats() {
     // Print the access breakdown
-    auto total_accesses = writes + reads;
+    auto total_accesses = writes_ + reads_;
     std::cout << "TOTAL ACCESSES: " << total_accesses << '\n';
-    std::cout << "   READS: " << writes + reads << '\n';
-    std::cout << "  WRITES: " << writes + reads << '\n';
+    std::cout << "   READS: " << reads_ << '\n';
+    std::cout << "  WRITES: " << writes_ << '\n';
 
     // Print the miss-rate breakdown
-    double miss_rate = misses / total_accesses * 100.0;
-    auto hits = total_accesses - misses;
+    double miss_rate = misses_ / total_accesses * 100.0;
+    auto hits = total_accesses - misses_;
     std::cout << "MISS-RATE: " << miss_rate << '\n';
-    std::cout << "  MISSES: " << misses << '\n';
+    std::cout << "  MISSES: " << misses_ << '\n';
     std::cout << "    HITS: " << hits << '\n';
 
     // Print the instruction breakdown
-    double ipc = instructions / cycles;
+    double ipc = instructions_ / cycles_;
     std::cout << "IPC: " << ipc << '\n';
-    std::cout << "  INSTRUCTIONS: " << instructions << '\n';
-    std::cout << "        CYCLES: " << cycles << '\n';
-    std::cout << "      DIRTY WB: " << dirty_wb << '\n';
+    std::cout << "  INSTRUCTIONS: " << instructions_ << '\n';
+    std::cout << "        CYCLES: " << cycles_ << '\n';
+    std::cout << "      DIRTY WB: " << dirty_wb_ << '\n';
   }
 
   // Get memory access from the trace file
-  std::tuple<bool, std::int64_t, int> parse_line(std::string access) {
+  std::tuple<bool, std::uint64_t, int> parse_line(std::string access) {
     // What we want to parse
     int type;
     std::uint64_t address;
@@ -101,6 +137,90 @@ class CacheSim {
     // Parse from the string we read from the file
     sscanf(access.c_str(), "# %d %lx %d", &type, &address, &instructions);
     return {type, address, instructions};
+  }
+
+  // Probe the cache
+  std::tuple<bool, std::int64_t> probe(bool type, std::uint64_t address) {
+    // Calculate the set from the address
+    auto set = get_set(address);
+    auto tag = get_tag(address);
+
+    // Create a spans for our set
+    auto base = set * associativity;
+    std::span local_tags{tags.data() + base, associativity};
+    std::span local_dirty{dirty.data() + base, associativity};
+    std::span local_valid{valid.data() + base, associativity};
+    std::span local_priority{priority.data() + base, associativity};
+
+    // Check each cache line in the set
+    auto hit = false;
+    int invalid_index = -1;
+    int index;
+    for (auto i = 0u; i < local_valid.size(); i++) {
+      // Check if the block is invalid
+      if (!valid[base + i]) {
+        // Keep track of invalid entries in case we need them
+        invalid_index = i;
+        continue;
+      }
+
+      // Check if the tag matches
+      if (tag != tags[base + i]) continue;
+
+      // We found the line, so mark it as a hit and exit the loop
+      hit = true;
+      index = i;
+      break;
+    }
+
+    // Find an element to replace if it wasn't a hit
+    auto dirty_wb = false;
+    if (!hit) {
+      // Use an open cache line (if available)
+      if (invalid_index >= 0) index = invalid_index;
+      // Otherwise, use the lowest-priority cache block (highest priority value)
+      else {
+        auto max_element = std::ranges::max_element(local_priority);
+        index = std::distance(begin(local_priority), max_element);
+      }
+
+      // Update the tag and see if it was a dirty writeback
+      local_tags[index] = tag;
+      dirty_wb = local_dirty[index];
+    }
+
+    // Update dirty flag and priority
+    local_dirty[index] = type;
+    std::transform(begin(local_priority), end(local_priority),
+                   begin(local_priority), [&](int p) {
+                     if (p <= local_priority[index] && p < associativity)
+                       return p + 1;
+                     else
+                       return p;
+                   });
+    local_priority[index] = 0;
+
+    // Calculate the cycles for this access
+    // Each memory access is one cycle
+    auto cycles = 1;
+    // Add miss penalty
+    if (!hit) cycles += miss_penalty;
+    // Add dirty writeback penalty
+    if (dirty_wb) cycles += wb_penalty;
+
+    return {dirty_wb, cycles};
+  }
+
+  // Extract the set number
+  int get_set(std::uint64_t address) {
+    auto shifted_address = address >> set_offset;
+    return shifted_address & set_mask;
+  }
+
+  // Extract the tag
+  std::uint64_t get_tag(std::uint64_t address) {
+    auto shifted_address = address >> tag_offset;
+    return shifted_address & tag_offset;
   }
 };
 
@@ -112,12 +232,15 @@ int main(int argc, char *argv[]) {
   std::string location(argv[1]);
 
   // Hard coded cache settings
-  int block_size = 1 << 6;
-  int associativity = 1 << 3;
-  int capacity = 1 << 15;
+  unsigned block_size = 1 << 6;
+  unsigned associativity = 1 << 3;
+  unsigned capacity = 1 << 15;
+  unsigned miss_penalty = 30;
+  unsigned dirty_wb_penalty = 2;
 
   // Create our simulator
-  CacheSim simulator(location, block_size, associativity, capacity);
+  CacheSim simulator(location, block_size, associativity, capacity,
+                     miss_penalty, dirty_wb_penalty);
   simulator.run();
 
   return 0;
