@@ -172,14 +172,14 @@ class CacheSim {
     int index;
     for (auto i = 0u; i < local_valid.size(); i++) {
       // Check if the block is invalid
-      if (!valid[base + i]) {
+      if (!local_valid[i]) {
         // Keep track of invalid entries in case we need them
         invalid_index = i;
         continue;
       }
 
       // Check if the tag matches
-      if (tag != tags[base + i]) continue;
+      if (tag != local_tags[i]) continue;
 
       // We found the line, so mark it as a hit and exit the loop
       hit = true;
@@ -190,8 +190,11 @@ class CacheSim {
     // Find an element to replace if it wasn't a hit
     auto dirty_wb = false;
     if (!hit) {
-      // Use an open cache line (if available)
-      if (invalid_index >= 0) index = invalid_index;
+      // Use an invalid line in this set (if available)
+      if (invalid_index >= 0) {
+        index = invalid_index;
+        local_valid[index] = 1;
+      }
       // Otherwise, use the lowest-priority cache block (highest priority value)
       else {
         auto max_element = std::ranges::max_element(local_priority);
