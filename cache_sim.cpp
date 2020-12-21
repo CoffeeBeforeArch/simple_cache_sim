@@ -113,7 +113,17 @@ class CacheSim {
 
   // Dump the statistics from simulation
   void dump_stats() {
+    // Print the cache settings
+    std::cout << "CACHE SETTINGS\n";
+    std::cout << "       Cache Size (Bytes): " << capacity << '\n';
+    std::cout << "           Associativity : " << associativity << '\n';
+    std::cout << "       Block Size (Bytes): " << block_size << '\n';
+    std::cout << "    Miss Penalty (Cycles): " << miss_penalty << '\n';
+    std::cout << "Dirty WB Penalty (Cycles): " << dirty_wb_penalty << '\n';
+    std::cout << '\n';
+
     // Print the access breakdown
+    std::cout << "CACHE STATS\n";
     std::cout << "TOTAL ACCESSES: " << mem_accesses_ << '\n';
     std::cout << "         READS: " << mem_accesses_ - writes_ << '\n';
     std::cout << "        WRITES: " << writes_ << '\n';
@@ -142,6 +152,7 @@ class CacheSim {
 
     // Parse from the string we read from the file
     sscanf(access.c_str(), "# %d %lx %d", &type, &address, &instructions);
+
     return {type, address, instructions};
   }
 
@@ -208,7 +219,7 @@ class CacheSim {
 
     // Calculate the cycles for this access
     // Each memory access is one cycle
-    auto cycles = 1;
+    auto cycles = 0;
     // Add miss penalty
     if (!hit) cycles += miss_penalty;
     // Add dirty writeback penalty
@@ -230,7 +241,7 @@ class CacheSim {
   }
 
   // Update the stats
-  void update_stats(int instructions, bool hit, bool type, bool dirty_wb,
+  void update_stats(int instructions, bool type, bool hit, bool dirty_wb,
                     int cycles) {
     mem_accesses_++;
     writes_ += type;
@@ -249,7 +260,7 @@ int main(int argc, char *argv[]) {
   std::string location(argv[1]);
 
   // Hard coded cache settings
-  unsigned block_size = 1 << 6;
+  unsigned block_size = 1 << 4;
   unsigned associativity = 1 << 0;
   unsigned capacity = 1 << 14;
   unsigned miss_penalty = 30;
