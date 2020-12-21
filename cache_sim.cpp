@@ -54,8 +54,6 @@ class CacheSim {
     // Calculate the bit-offset for the tag and create a mask of 1s
     // Always use 64-bit addresses
     tag_offset = block_bits + set_bits;
-    auto tag_bits = 64 - set_bits - block_bits;
-    tag_mask = (1 << tag_bits) - 1;
   }
 
   // Run the simulation
@@ -95,7 +93,6 @@ class CacheSim {
   int set_offset;
   int tag_offset;
   int set_mask;
-  int tag_mask;
 
   // The actual cache state
   std::vector<std::uint64_t> tags;
@@ -229,15 +226,18 @@ class CacheSim {
   }
 
   // Extract the set number
+  // Shift the set to the bottom then extract the set bits
   int get_set(std::uint64_t address) {
     auto shifted_address = address >> set_offset;
     return shifted_address & set_mask;
   }
 
   // Extract the tag
+  // Shift the tag to the bottom
+  // No need to use mask (tag is all upper remaining bits)
   std::uint64_t get_tag(std::uint64_t address) {
     auto shifted_address = address >> tag_offset;
-    return shifted_address & tag_offset;
+    return shifted_address;
   }
 
   // Update the stats
