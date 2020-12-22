@@ -65,10 +65,10 @@ class CacheSim {
       auto [type, address, instructions] = parse_line(line);
 
       // Probe the cache
-      auto [hit, dirty_wb, cycles] = probe(type, address);
+      auto [hit, dirty_wb] = probe(type, address);
 
       // Update the cache statistics
-      update_stats(instructions, type, hit, dirty_wb, cycles);
+      update_stats(instructions, type, hit, dirty_wb);
     }
   }
 
@@ -106,7 +106,6 @@ class CacheSim {
   std::int64_t misses_ = 0;
   std::int64_t dirty_wb_ = 0;
   std::int64_t instructions_ = 0;
-  std::int64_t cycles_ = 0;
 
   // Dump the statistics from simulation
   void dump_stats() {
@@ -120,23 +119,30 @@ class CacheSim {
     std::cout << '\n';
 
     // Print the access breakdown
-    std::cout << "CACHE STATS\n";
+    std::cout << "CACHE ACCESS STATS\n";
     std::cout << "TOTAL ACCESSES: " << mem_accesses_ << '\n';
     std::cout << "         READS: " << mem_accesses_ - writes_ << '\n';
     std::cout << "        WRITES: " << writes_ << '\n';
+    std::cout << '\n';
 
     // Print the miss-rate breakdown
+    std::cout << "CACHE MISS-RATE STATS\n";
     double miss_rate = (double)misses_ / (double)mem_accesses_ * 100.0;
     auto hits = mem_accesses_ - misses_;
     std::cout << "     MISS-RATE: " << miss_rate << '\n';
     std::cout << "        MISSES: " << misses_ << '\n';
     std::cout << "          HITS: " << hits << '\n';
+    std::cout << '\n';
 
     // Print the instruction breakdown
-    double ipc = (double)instructions_ / (double)cycles_;
+    std::cout << "CACHE IPC STATS\n";
+    auto cycles = miss_penalty * misses_;
+    cycles += dirty_wb_penalty * dirty_wb_;
+    cycles += instructions_;
+    double ipc = (double)instructions_ / (double)cycles;
     std::cout << "           IPC: " << ipc << '\n';
     std::cout << "  INSTRUCTIONS: " << instructions_ << '\n';
-    std::cout << "        CYCLES: " << cycles_ << '\n';
+    std::cout << "        CYCLES: " << cycles << '\n';
     std::cout << "      DIRTY WB: " << dirty_wb_ << '\n';
   }
 
@@ -154,7 +160,7 @@ class CacheSim {
   }
 
   // Probe the cache
-  std::tuple<bool, bool, std::int64_t> probe(bool type, std::uint64_t address) {
+  std::tuple<bool, bool> probe(bool type, std::uint64_t address) {
     // Calculate the set from the address
     auto set = get_set(address);
     auto tag = get_tag(address);
@@ -228,14 +234,7 @@ class CacheSim {
     // Currently accessed block has the highest priority (0)
     local_priority[index] = 0;
 
-    // Calculate the cycles for this access
-    auto cycles = 0;
-    // Add miss penalty
-    if (!hit) cycles += miss_penalty;
-    // Add dirty writeback penalty
-    if (dirty_wb) cycles += dirty_wb_penalty;
-
-    return {hit, dirty_wb, cycles};
+    return {hit, dirty_wb};
   }
 
   // Extract the set number
@@ -254,14 +253,12 @@ class CacheSim {
   }
 
   // Update the stats
-  void update_stats(int instructions, bool type, bool hit, bool dirty_wb,
-                    int cycles) {
+  void update_stats(int instructions, bool type, bool hit, bool dirty_wb) {
     mem_accesses_++;
     writes_ += type;
     misses_ += !hit;
     instructions_ += instructions;
     dirty_wb_ += dirty_wb;
-    cycles_ += cycles;
   }
 };
 
