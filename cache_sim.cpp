@@ -181,33 +181,42 @@ class CacheSim {
       // Check if the tag matches
       if (tag != local_tags[i]) continue;
 
-      // We found the line, so mark it as a hit and exit the loop
+      // We found the line, so mark it as a hit
       hit = true;
       index = i;
+
+      // Update dirty flag
+      local_dirty[index] |= type;
+
+      // Break out of the loop
       break;
     }
 
     // Find an element to replace if it wasn't a hit
     auto dirty_wb = false;
     if (!hit) {
-      // Use an invalid line in this set (if available)
+      // First try and use an invalid line (if available)
       if (invalid_index >= 0) {
         index = invalid_index;
         local_valid[index] = 1;
       }
-      // Otherwise, use the lowest-priority cache block (highest priority value)
+      // Otherwise, evict the lowest-priority cache block (largest value)
       else {
         auto max_element = std::ranges::max_element(local_priority);
         index = std::distance(begin(local_priority), max_element);
+        dirty_wb = local_dirty[index];
       }
 
-      // Update the tag and see if it was a dirty writeback
+      // Update the tag and dirty state
       local_tags[index] = tag;
-      dirty_wb = local_dirty[index];
+      local_dirty[index] = type;
     }
 
-    // Update dirty flag and priority
-    local_dirty[index] = type;
+    // Update the priority
+    // Go through each element
+    // Increase the priority of all the blocks with a lower priority than the
+    // one we are accessing
+    // High priority -> Low priority = 0 -> associativity - 1
     std::transform(begin(local_priority), end(local_priority),
                    begin(local_priority), [&](int p) {
                      if (p <= local_priority[index] && p < associativity)
@@ -215,10 +224,11 @@ class CacheSim {
                      else
                        return p;
                    });
+
+    // Currently accessed block has the highest priority (0)
     local_priority[index] = 0;
 
     // Calculate the cycles for this access
-    // Each memory access is one cycle
     auto cycles = 0;
     // Add miss penalty
     if (!hit) cycles += miss_penalty;
