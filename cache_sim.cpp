@@ -43,13 +43,13 @@ class CacheSim {
     // Cache lines come in the following format:
     // |****** TAG ******|**** SET ****|** OFFSET **|
     // Calculate the number of offset bits
-    auto block_bits = std::__popcount(block_size - 1);
+    auto block_bits = std::popcount(block_size - 1);
 
     // Calculate the number of set bits, and create a mask of 1s
     set_offset = block_bits;
     auto sets = capacity / (block_size * associativity);
     set_mask = sets - 1;
-    auto set_bits = std::__popcount(set_mask);
+    auto set_bits = std::popcount(set_mask);
 
     // Calculate the bit-offset for the tag and create a mask of 1s
     // Always use 64-bit addresses
@@ -90,9 +90,9 @@ class CacheSim {
   unsigned dirty_wb_penalty;
 
   // Access settings
-  int set_offset;
-  int tag_offset;
-  int set_mask;
+  unsigned set_offset;
+  unsigned tag_offset;
+  unsigned set_mask;
 
   // The actual cache state
   std::vector<std::uint64_t> tags;
@@ -165,7 +165,7 @@ class CacheSim {
     auto set = get_set(address);
     auto tag = get_tag(address);
 
-    // Create a spans for our set
+    // create a spans for our set
     auto base = set * associativity;
     std::span local_tags{tags.data() + base, associativity};
     std::span local_dirty{dirty.data() + base, associativity};
@@ -248,8 +248,7 @@ class CacheSim {
   // Shift the tag to the bottom
   // No need to use mask (tag is all upper remaining bits)
   std::uint64_t get_tag(std::uint64_t address) {
-    auto shifted_address = address >> tag_offset;
-    return shifted_address;
+    return address >> tag_offset;
   }
 
   // Update the stats
